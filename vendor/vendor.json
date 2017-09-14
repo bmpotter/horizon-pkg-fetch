@@ -2,5 +2,5 @@
 	"comment": "",
 	"ignore": "test",
 	"package": [],
-	"rootPath": "github.com/open-horizon/horizon-workload-package"
+	"rootPath": "github.com/open-horizon/horizon-pkg-fetch"
 }
