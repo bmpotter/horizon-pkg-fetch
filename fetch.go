@@ -1,6 +1,7 @@
 package fetch
 
 import (
+	"github.com/open-horizon/horizon-pkg-fetch/horizonpkg"
 	"net/http"
 )
 
@@ -64,7 +65,7 @@ type FetchTask struct {
 	DestinationPath string // the identifier for the FetchTask
 	Cancelation     FetchCancelation
 	FetchTryHistory []FetchTry
-	Pkg             *HorizonPkg
+	Pkg             *horizonpkg.Pkg
 }
 
 // FetchTry is a historical record of a fetch attempt, either successful or

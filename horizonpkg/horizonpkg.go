@@ -1,30 +1,75 @@
 package horizonpkg
 
 import (
+	"crypto/sha1"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/golang/glog"
+	"io"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
+	"time"
+)
+
+const (
+	// constant for now
+	specVersion = "0.1.0"
 )
 
 type DockerImageParts map[string]DockerImagePart
 
 type Pkg struct {
+	ID    string           `json:"id"`
 	Meta  *Meta            `json:"meta"`
 	Parts DockerImageParts `json:"parts"`
 }
 
+func (p *Pkg) Serialize() ([]byte, error) {
+	serial, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+
+	return serial, nil
+}
+
+// imageIDs contains all intended parts' names; the builder will error if not all IDs fulfilled with parts.
+// This is a check on the build process; the imageIDs are also a part of the immutable identity of the pkg.
 type PkgBuilder struct {
 	pkg                   *Pkg
 	permitEmptySignatures bool
+	imageIDs              []string
+	partMutex             sync.Mutex
+}
+
+// creates an ID for the package that is repeatably calculable from the content
+// TODO: provide functions to calculate the package ID from a pkg file.
+func pkgID(author string, createTS int64, imageIDs []string) string {
+	hash := sha1.New()
+
+	io.WriteString(hash, author)
+
+	tsBin := make([]byte, 8)
+	binary.LittleEndian.PutUint64(tsBin, uint64(createTS))
+	hash.Write(tsBin)
+
+	sort.Strings(imageIDs)
+	for _, id := range imageIDs {
+		io.WriteString(hash, id)
+	}
+
+	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
 // NewDockerImagePkgBuilder is a factory method for a pkg builder. It's
 // expected that after getting a reference to this type, one will use AddPart()
 // and related functions to populate it and then call BuildPkg() to produce an
 // immutable package.
-func NewDockerImagePkgBuilder(partsType PartsType, author string, specVer string) (*PkgBuilder, error) {
+func NewDockerImagePkgBuilder(partsType PartsType, author string, imageIDs []string) (*PkgBuilder, error) {
 
 	switch partsType {
 	// TODO: could have a type like "REGISTRY" here that merely fetches from a docker registry
@@ -39,17 +84,22 @@ func NewDockerImagePkgBuilder(partsType PartsType, author string, specVer string
 		Images:       DockerImagePartNames{},
 	}
 
+	createTS := time.Now().UnixNano()
+
 	return &PkgBuilder{
 		pkg: &Pkg{
+			ID: pkgID(author, createTS, imageIDs),
 			Meta: &Meta{
 				PartsType:   partsType,
 				Author:      author,
-				SpecVersion: specVer,
+				SpecVersion: specVersion,
+				CreateTS:    createTS,
 				Provides:    provides,
 			},
 			Parts: DockerImageParts{},
 		},
 		permitEmptySignatures: false,
+		partMutex:             sync.Mutex{},
 	}, nil
 }
 
@@ -63,40 +113,61 @@ func (p *PkgBuilder) SetPermitEmptySignatures() *PkgBuilder {
 }
 
 // AddPart adds a DockerImagePart to Pkg.Parts and Pkg.Meta.Provides. Note
-// that the id is not required; if it is an empty string, the sha1sum will be
-// used as the id instead. A valid sha1sum is a hex representation of the
-// 160-bit sequence.
-func (p *PkgBuilder) AddPart(id string, sha1sum string, dockerImageRepoTag string, signatures []string, bytes uint, sources ...PartSource) (*PkgBuilder, error) {
+// that the id is not required; if it is an empty string, the sha256sum will be
+// used as the id instead. A valid sha256sum is a hex representation of the
+// 256-bit sequence.
+func (p *PkgBuilder) AddPart(id string, sha256sum string, dockerImageRepoTag string, signatures []string, bytes int64, sources ...PartSource) (*PkgBuilder, error) {
 
-	if sha1sumInvalid, err := regexp.MatchString("[^0-9A-Za-z]", sha1sum); sha1sumInvalid || err != nil || len(sha1sum) != 40 {
-		return nil, fmt.Errorf("Invalid sha1sum, expected a 40-char hex representation of a hash")
+	if sha256sumInvalid, err := regexp.MatchString("[^0-9A-Za-z]", sha256sum); err != nil || sha256sumInvalid || len(sha256sum) != 64 {
+		return nil, fmt.Errorf("Invalid sha256sum, expected a 64-char hex representation of a hash. Hash was %v chars in length", len(sha256sum))
 	}
 
-	// N.B. we don't do a lot of rigorous checking of arguments besides the sha1sum and id (those are essential to identify the part)
+	// N.B. we don't do a lot of rigorous checking of arguments besides the sha256sum and id (those are essential to identify the part)
 
 	pID := strings.TrimSpace(id)
 	if id == "" {
-		pID = strings.TrimSpace(sha1sum)
+		pID = strings.TrimSpace(sha256sum)
 	}
 
-	if part, exists := p.pkg.Parts[pID]; exists {
-		return nil, fmt.Errorf("Provided pkg part id conflicts with already existing part. Existing: %v", part)
+	p.partMutex.Lock()
+	idPartCheck, exists := p.pkg.Parts[pID]
+	p.partMutex.Unlock()
+
+	if exists {
+		return nil, fmt.Errorf("Provided pkg part id conflicts with already existing part. Existing: %v", idPartCheck)
 	}
 
-	for _, part := range p.pkg.Parts {
-		if part.Sha1sum == sha1sum {
-			return nil, fmt.Errorf("Provided pkg part sha1sum conflicts with already existing part. Existing: %v")
+	checkErr := false
+	p.partMutex.Lock()
+	for _, partCheck := range p.pkg.Parts {
+		if partCheck.Sha256sum == sha256sum {
+			checkErr = true
 		}
 	}
+	p.partMutex.Unlock()
+	if checkErr {
+		return nil, fmt.Errorf("Provided pkg part sha256sum conflicts with already existing part. Existing: %v", sha256sum)
+	}
 
+	imageIDConflictErr := false
+	imageRepoTagConflictErr := false
+	p.partMutex.Lock()
 	for id, dockerImageName := range p.pkg.Meta.Provides.Images {
 		if id == pID {
-			return nil, fmt.Errorf("Provided pkg part id conflicts with already existing entry in meta section. Existing: %v")
+			imageIDConflictErr = true
 		}
 
 		if dockerImageName == dockerImageRepoTag {
-			return nil, fmt.Errorf("Provided pkg part's dockerImageRepoTag conflicts with already existing entry in meta section. Existing: %v")
+			imageRepoTagConflictErr = true
 		}
+	}
+	p.partMutex.Unlock()
+	if imageIDConflictErr {
+		return nil, fmt.Errorf("Provided pkg part id conflicts with already existing entry in meta section. Existing: %v", pID)
+	}
+
+	if imageRepoTagConflictErr {
+		return nil, fmt.Errorf("Provided pkg part's dockerImageRepoTag conflicts with already existing entry in meta section. Existing: %v", dockerImageRepoTag)
 	}
 
 	if len(signatures) == 0 && !p.permitEmptySignatures {
@@ -109,7 +180,7 @@ func (p *PkgBuilder) AddPart(id string, sha1sum string, dockerImageRepoTag strin
 
 	part := DockerImagePart{
 		Id:         pID,
-		Sha1sum:    sha1sum,
+		Sha256sum:  sha256sum,
 		Signatures: signatures,
 		Bytes:      bytes,
 		Sources:    sources,
@@ -117,11 +188,29 @@ func (p *PkgBuilder) AddPart(id string, sha1sum string, dockerImageRepoTag strin
 
 	p.pkg.Parts[id] = part
 	p.pkg.Meta.Provides.Images[id] = dockerImageRepoTag
+
 	return p, nil
 }
 
-func (p *PkgBuilder) Build() *Pkg {
-	return p.pkg
+func (p *PkgBuilder) ID() string {
+	return p.pkg.ID
+}
+
+func (p *PkgBuilder) Build() (*Pkg, []byte, error) {
+
+	// check that all of the builder's images are in the package parts or error
+	for _, imageID := range p.imageIDs {
+		if _, ok := p.pkg.Parts[imageID]; !ok {
+			return nil, nil, fmt.Errorf("Expected image with id: %v not in Package parts. Use *Pkg.AddPart() to add the appropriate part for this image ID.", imageID)
+		}
+	}
+
+	serialized, err := p.pkg.Serialize()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return p.pkg, serialized, nil
 }
 
 // PartsType is a faux-enum identifying the type of parts in this Pkg
@@ -154,6 +243,7 @@ type Meta struct {
 	Author      string              `json:"author"`
 	SpecVersion string              `json:"spec_version"`
 	Provides    DockerPartsProvides `json:"provides"`
+	CreateTS    int64               `json:"createTS"` // unix nanoseconds
 }
 
 type PartSource struct {
@@ -162,8 +252,8 @@ type PartSource struct {
 
 type DockerImagePart struct {
 	Id         string       `json:"id"`
-	Sha1sum    string       `json:"sha1sum"`
+	Sha256sum  string       `json:"sha256sum"`
 	Signatures []string     `json:"signatures"`
-	Bytes      uint         `json:"bytes"`
+	Bytes      int64        `json:"bytes"`
 	Sources    []PartSource `json:"sources"`
 }
