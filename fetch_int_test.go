@@ -89,7 +89,7 @@ func fakeHTTPClientFactory(timeoutS *uint) *http.Client {
 func Test_PkgFetch_Suite(suite *testing.T) {
 	tmpDir, err := ioutil.TempDir("", "fetch-test-int-")
 	assert.Nil(suite, err)
-	//defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir)
 
 	// serve out of tmpDir, setup will change content of the Pkg to match the ad-hoc server set up here
 	server := httptest.NewServer(http.FileServer(http.Dir(fmt.Sprintf("%v/srv", tmpDir))))
