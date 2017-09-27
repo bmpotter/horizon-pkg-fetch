@@ -20,14 +20,14 @@ const (
 	specVersion = "0.1.0"
 )
 
-type DockerImageParts map[string]DockerImagePart
-
+// Pkg is the primary type in a Horizon Pkg bundle
 type Pkg struct {
 	ID    string           `json:"id"`
 	Meta  *Meta            `json:"meta"`
 	Parts DockerImageParts `json:"parts"`
 }
 
+// Serialize outputs a JSON-serialized byte array of this Pkg
 func (p *Pkg) Serialize() ([]byte, error) {
 	serial, err := json.Marshal(p)
 	if err != nil {
@@ -37,16 +37,59 @@ func (p *Pkg) Serialize() ([]byte, error) {
 	return serial, nil
 }
 
-// imageIDs contains all intended parts' names; the builder will error if not all IDs fulfilled with parts.
-// This is a check on the build process; the imageIDs are also a part of the immutable identity of the pkg.
-type PkgBuilder struct {
-	pkg                   *Pkg
-	permitEmptySignatures bool
-	imageIDs              []string
-	partMutex             sync.Mutex
+// Meta describes metadata common to all Horizon Pkgs
+type Meta struct {
+	PartsType   PartsType           `json:"parts_type"`
+	Author      string              `json:"author"`
+	SpecVersion string              `json:"spec_version"`
+	Provides    DockerPartsProvides `json:"provides"`
+	CreateTS    int64               `json:"createTS"` // unix nanoseconds
 }
 
-// creates an ID for the package that is repeatably calculable from the content
+// DockerImageParts describes mappings of image ids to Pkg parts that are Docker providers
+type DockerImageParts map[string]DockerImagePart
+
+// PartsType is a faux-enum identifying the type of parts in this Pkg
+type PartsType string
+
+const (
+	// FILE is a parts type that is a plain file
+	FILE PartsType = "FILE"
+)
+
+// ProvidesType is a faux-enum identifying the type that this Pkg's parts
+// provide.
+type ProvidesType string
+
+const (
+	// DOCKER is a provider type indicating Docker parts
+	DOCKER ProvidesType = "DOCKER"
+)
+
+// DockerImagePartNames is a mapping b/n a "part" name (see the DockerImagePart type) and its docker image name
+type DockerImagePartNames map[string]string
+
+// DockerPartsProvides is one (and the only, for now) PartsProvides type. This
+// is a metadata structure that describes the use of the Parts in a Pkg.
+type DockerPartsProvides struct {
+	ProvidesType ProvidesType         `json:"provides_type"`
+	Images       DockerImagePartNames `json:"images"`
+}
+
+// PartSource indicates a fetchable source of a Pkg part
+type PartSource struct {
+	URL string `json:"url"`
+}
+
+// DockerImagePart is a Part that provides a Docker image
+type DockerImagePart struct {
+	ID         string       `json:"id"`
+	Sha256sum  string       `json:"sha256sum"`
+	Signatures []string     `json:"signatures"`
+	Bytes      int64        `json:"bytes"`
+	Sources    []PartSource `json:"sources"`
+} // creates an ID for the package that is repeatably calculable from the content
+
 // TODO: provide functions to calculate the package ID from a pkg file.
 func pkgID(author string, createTS int64, imageIDs []string) string {
 	hash := sha1.New()
@@ -101,6 +144,39 @@ func NewDockerImagePkgBuilder(partsType PartsType, author string, imageIDs []str
 		permitEmptySignatures: false,
 		partMutex:             sync.Mutex{},
 	}, nil
+}
+
+// PkgBuilder is a builder pattern companion object to the Pkg type
+// imageIDs contains all intended parts' names; the builder will error if not all IDs fulfilled with parts.
+// This is a check on the build process; the imageIDs are also a part of the immutable identity of the pkg.
+type PkgBuilder struct {
+	pkg                   *Pkg
+	permitEmptySignatures bool
+	imageIDs              []string
+	partMutex             sync.Mutex
+}
+
+// ID is a unique ID for the package managed by this builder
+func (p *PkgBuilder) ID() string {
+	return p.pkg.ID
+}
+
+// Build produces a Pkg from this PkgBuilder
+func (p *PkgBuilder) Build() (*Pkg, []byte, error) {
+
+	// check that all of the builder's images are in the package parts or error
+	for _, imageID := range p.imageIDs {
+		if _, ok := p.pkg.Parts[imageID]; !ok {
+			return nil, nil, fmt.Errorf("Expected image with id: %v not in Package parts. Use *Pkg.AddPart() to add the appropriate part for this image ID.", imageID)
+		}
+	}
+
+	serialized, err := p.pkg.Serialize()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return p.pkg, serialized, nil
 }
 
 // SetPermitEmptySignatures sets this builder instance to allow empty
@@ -179,81 +255,15 @@ func (p *PkgBuilder) AddPart(id string, sha256sum string, dockerImageRepoTag str
 	}
 
 	part := DockerImagePart{
-		Id:         pID,
+		ID:         pID,
 		Sha256sum:  sha256sum,
 		Signatures: signatures,
 		Bytes:      bytes,
 		Sources:    sources,
 	}
 
-	p.pkg.Parts[id] = part
-	p.pkg.Meta.Provides.Images[id] = dockerImageRepoTag
+	p.pkg.Parts[pID] = part
+	p.pkg.Meta.Provides.Images[pID] = dockerImageRepoTag
 
 	return p, nil
-}
-
-func (p *PkgBuilder) ID() string {
-	return p.pkg.ID
-}
-
-func (p *PkgBuilder) Build() (*Pkg, []byte, error) {
-
-	// check that all of the builder's images are in the package parts or error
-	for _, imageID := range p.imageIDs {
-		if _, ok := p.pkg.Parts[imageID]; !ok {
-			return nil, nil, fmt.Errorf("Expected image with id: %v not in Package parts. Use *Pkg.AddPart() to add the appropriate part for this image ID.", imageID)
-		}
-	}
-
-	serialized, err := p.pkg.Serialize()
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return p.pkg, serialized, nil
-}
-
-// PartsType is a faux-enum identifying the type of parts in this Pkg
-type PartsType string
-
-const (
-	FILE PartsType = "FILE"
-)
-
-// ProvidesType is a faux-enum identifying the type that this Pkg's parts
-// provide.
-type ProvidesType string
-
-const (
-	DOCKER ProvidesType = "DOCKER"
-)
-
-// DockerImagePartName is a mapping b/n a "part" name (see the DockerImagePart type) and its docker image name
-type DockerImagePartNames map[string]string
-
-// DockerPartsProvides is one (and the only, for now) PartsProvides type. This
-// is a metadata structure that describes the use of the Parts in a Pkg.
-type DockerPartsProvides struct {
-	ProvidesType ProvidesType         `json:"provides_types"`
-	Images       DockerImagePartNames `json:"images"`
-}
-
-type Meta struct {
-	PartsType   PartsType           `json:"parts_type"`
-	Author      string              `json:"author"`
-	SpecVersion string              `json:"spec_version"`
-	Provides    DockerPartsProvides `json:"provides"`
-	CreateTS    int64               `json:"createTS"` // unix nanoseconds
-}
-
-type PartSource struct {
-	URL string `json:"url"`
-}
-
-type DockerImagePart struct {
-	Id         string       `json:"id"`
-	Sha256sum  string       `json:"sha256sum"`
-	Signatures []string     `json:"signatures"`
-	Bytes      int64        `json:"bytes"`
-	Sources    []PartSource `json:"sources"`
 }
