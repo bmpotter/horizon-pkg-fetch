@@ -27,6 +27,12 @@
 			"revisionTime": "2012-06-04T00:48:16Z"
 		},
 		{
+			"checksumSHA1": "Ac0sHflTyYX4PmgBEJ+POSTyd5o=",
+			"path": "github.com/boltdb/bolt",
+			"revision": "fa5367d20c994db73282594be0146ab221657943",
+			"revisionTime": "2017-09-07T20:20:52Z"
+		},
+		{
 			"checksumSHA1": "GqIrOttKaO7k6HIaHQLPr3cY7rY=",
 			"path": "github.com/containerd/continuity/pathdriver",
 			"revision": "617902de2ab5e18974efd88a58eeef67ac82d127",
@@ -219,22 +225,28 @@
 			"revisionTime": "2016-01-25T20:49:56Z"
 		},
 		{
-			"checksumSHA1": "RCY17ERceNDDiy7z6XT47jqTevQ=",
-			"path": "github.com/open-horizon/horizon-pkg-build",
-			"revision": "8d876f7bd29df5dff4a392984895169d71f14db7",
-			"revisionTime": "2017-09-26T15:52:08Z"
+			"checksumSHA1": "G/U0FXCu6ajOEK/gQS19ohsZ10k=",
+			"path": "github.com/open-horizon/anax/cutil",
+			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
+			"revisionTime": "2017-09-27T10:37:29Z"
 		},
 		{
-			"checksumSHA1": "VfnHfliwXMt8XWPSMAsDP6LcDFE=",
-			"path": "github.com/open-horizon/horizon-pkg-build/cmdtools",
-			"revision": "8d876f7bd29df5dff4a392984895169d71f14db7",
-			"revisionTime": "2017-09-26T15:52:08Z"
+			"checksumSHA1": "+D2aqX3XiZKsD/IJjdQKOZ2O00k=",
+			"path": "github.com/open-horizon/anax/events",
+			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
+			"revisionTime": "2017-09-27T10:37:29Z"
 		},
 		{
-			"checksumSHA1": "x1MHyqpBwc/zKOXt4Fi1yW4WjeY=",
-			"path": "github.com/open-horizon/horizon-pkg-build/create",
-			"revision": "8d876f7bd29df5dff4a392984895169d71f14db7",
-			"revisionTime": "2017-09-26T15:52:08Z"
+			"checksumSHA1": "krk+CIYFXz6T2sahdL1atNz6XRA=",
+			"path": "github.com/open-horizon/anax/persistence",
+			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
+			"revisionTime": "2017-09-27T10:37:29Z"
+		},
+		{
+			"checksumSHA1": "bXZXrAOgQoL1upfF3zpRkoRUm+Y=",
+			"path": "github.com/open-horizon/anax/policy",
+			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
+			"revisionTime": "2017-09-27T10:37:29Z"
 		},
 		{
 			"checksumSHA1": "6Ejtwv2PlXR8sT203iR38S7Y5qQ=",
@@ -289,6 +301,12 @@
 			"revisionTime": "2016-01-10T10:55:54Z"
 		},
 		{
+			"checksumSHA1": "zmC8/3V4ls53DJlNTKDZwPSC/dA=",
+			"path": "github.com/satori/go.uuid",
+			"revision": "5bf94b69c6b68ee1b541973bb8e1144db23a194b",
+			"revisionTime": "2017-03-21T23:07:31Z"
+		},
+		{
 			"checksumSHA1": "BYvROBsiyAXK4sq6yhDe8RgT4LM=",
 			"path": "github.com/sirupsen/logrus",
 			"revision": "89742aefa4b206dcf400792f3bd35b542998eb3b",
@@ -305,6 +323,18 @@
 			"path": "github.com/urfave/cli",
 			"revision": "ac249472b7de27a9e8990819566d9be95ab5b816",
 			"revisionTime": "2017-09-26T03:41:18Z"
+		},
+		{
+			"checksumSHA1": "UWjVYmoHlIfHzVIskELHiJQtMOI=",
+			"path": "golang.org/x/crypto/bcrypt",
+			"revision": "847319b7fc94cab682988f93da778204da164588",
+			"revisionTime": "2017-08-18T09:57:21Z"
+		},
+		{
+			"checksumSHA1": "oVPHWesOmZ02vLq2fglGvf+AMgk=",
+			"path": "golang.org/x/crypto/blowfish",
+			"revision": "847319b7fc94cab682988f93da778204da164588",
+			"revisionTime": "2017-08-18T09:57:21Z"
 		},
 		{
 			"checksumSHA1": "nqWNlnMmVpt628zzvyo6Yv2CX5Q=",

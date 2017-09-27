@@ -15,14 +15,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 )
 
 const (
 	testMaterialDirName = "test_material"
-	pkgID               = "0c5f9ebc62ea666ed60d4e9e308dee3505fcf65c"
+	pkgID               = "29ef6969f5cc871153e6a00ec197bb071ce8ceae"
 )
 
 func fromTestMaterialDir(pp string, t *testing.T) []byte {
@@ -42,7 +41,7 @@ func setup(t *testing.T, tmpDir string, serverURL string) *horizonpkg.Pkg {
 
 	// modify pkg so the paths match our server's domain and port
 	for id, _ := range pkg.Parts {
-		pkg.Parts[id].Sources[0] = horizonpkg.PartSource{fmt.Sprintf("%s/%s/%s.tar.gz", serverURL, pkg.ID, id)}
+		pkg.Parts[id].Sources[0] = horizonpkg.PartSource{fmt.Sprintf("%s/%s/%s.tgz", serverURL, pkg.ID, id)}
 	}
 
 	bytes, err := json.Marshal(pkg)
@@ -98,6 +97,11 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 
 	pkg := setup(suite, tmpDir, server.URL)
 
+	destinationDir := path.Join(tmpDir, "destination")
+
+	keysDir, err := filepath.Abs(path.Join(testMaterialDirName, "keys"))
+	assert.Nil(suite, err)
+
 	suite.Run("Confirm testMaterialDir is available and pkg metadata is readable", func(t *testing.T) {
 		assert.EqualValues(t, pkgID, pkg.ID)
 	})
@@ -108,28 +112,39 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 
-		resp, err = http.Get(fmt.Sprintf("%s/%s/%s.tar.gz", server.URL, pkgID, "2cad91d0395c3b75e209509c018058c3735589694988223aa207f1e238fb33cf"))
+		resp, err = http.Get(fmt.Sprintf("%s/%s/%s", server.URL, pkgID, "ce623bdd773c7527b48a1d9ce7ccd6b6cffee4a6e16849d061bd55c2c455b8fc.tgz"))
 		assert.Nil(t, err)
 
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 	})
 
-	suite.Run("PkgFetch fetches Pkg metadata file", func(t *testing.T) {
+	suite.Run("PkgFetch pkg signature verification argument", func(t *testing.T) {
 		url, err := url.Parse(fmt.Sprintf("%s/%s.json", server.URL, pkgID))
 		assert.Nil(t, err)
 
-		_, err = PkgFetch(fakeHTTPClientFactory, url, tmpDir, path.Join(testMaterialDirName, "keys"))
+		_, err = PkgFetch(fakeHTTPClientFactory, url, false, destinationDir, keysDir)
 		assert.NotNil(t, err)
-
-		t.Logf("******** %T", err)
-
-		if reflect.TypeOf(err).Name() != "VerificationError" {
-			t.Errorf("Expected VerificationError type, got: %T. Error: %v", err, err)
-		}
 	})
 
-	//suite.Run("", func(t *testing.T) {})
+	suite.Run("PkgFetch fetches served Pkg files and content, verifies them", func(t *testing.T) {
+		url, err := url.Parse(fmt.Sprintf("%s/%s.json", server.URL, pkgID))
+		assert.Nil(t, err)
 
-	//suite.Run("", func(t *testing.T) {})
-	//suite.Run("", func(t *testing.T) {})
+		pkgs, err := PkgFetch(fakeHTTPClientFactory, url, true, destinationDir, keysDir)
+		assert.Nil(t, err)
+
+		assert.EqualValues(t, 2, len(pkgs))
+
+		// get whatever comes up first
+		var id string
+		for id, _ = range pkg.Parts {
+			break
+		}
+
+		abs, err := filepath.Abs(path.Join(destinationDir, pkg.ID, id))
+		assert.Nil(t, err)
+		assert.Contains(t, pkgs, abs)
+	})
+
+	// TODO: expand these cases, test the edges
 }
