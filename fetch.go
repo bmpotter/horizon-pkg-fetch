@@ -16,11 +16,42 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
+func authenticatedRequest(url string, authCreds map[string]map[string]string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// matching them (for now) amounts to first prefix match wins
+	for k, v := range authCreds {
+		if strings.HasSuffix(url, k) {
+			var username string
+			if val, ok := v["username"]; ok {
+				username = val
+			}
+
+			var password string
+			if val, ok := v["password"]; ok {
+				password = val
+			}
+
+			if username != "" && password != "" {
+				glog.V(3).Infof("Using username %v in HTTPS Basic auth header to %v", username, url)
+				req.SetBasicAuth(username, password)
+				break
+			}
+		}
+	}
+
+	return req, nil
+}
+
 // side effect: stores the pkgMeta file in destinationDir
-func fetchPkgMeta(client *http.Client, primarySigningKey string, userKeysDir string, pkgURL string, pkgURLSignature string, destinationDir string) (*horizonpkg.Pkg, error) {
+func fetchPkgMeta(client *http.Client, authCreds map[string]map[string]string, primarySigningKey string, userKeysDir string, pkgURL string, pkgURLSignature string, destinationDir string) (*horizonpkg.Pkg, error) {
 	writeFile := func(destinationDir string, fileName string, content []byte) (string, error) {
 		destFilePath := path.Join(destinationDir, fileName)
 		// this'll overwrite
@@ -33,8 +64,13 @@ func fetchPkgMeta(client *http.Client, primarySigningKey string, userKeysDir str
 
 	glog.V(5).Infof("Fetching Pkg from %v", pkgURL)
 
+	req, err := authenticatedRequest(pkgURL, authCreds)
+	if err != nil {
+		return nil, err
+	}
+
 	// fetch, hydrate
-	response, err := client.Get(pkgURL)
+	response, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +151,7 @@ func newFetchErrRecorder() fetchErrRecorder {
 	}
 }
 
-func fetchPkgPart(client *http.Client, partPath string, expectedBytes int64, sources []horizonpkg.PartSource) error {
+func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, partPath string, expectedBytes int64, sources []horizonpkg.PartSource) error {
 	tryOpen := func(path string) (*os.File, error) {
 		return os.OpenFile(partPath, os.O_RDWR|os.O_CREATE, 0600)
 	}
@@ -164,7 +200,13 @@ func fetchPkgPart(client *http.Client, partPath string, expectedBytes int64, sou
 
 	// we are clean, try download
 	for _, source := range sources {
-		response, err := client.Get(source.URL)
+		req, err := authenticatedRequest(source.URL, authCreds)
+		if err != nil {
+			return err
+		}
+
+		// fetch, hydrate
+		response, err := client.Do(req)
 		if err != nil || response.StatusCode != 200 {
 			glog.Errorf("Failed to download part %v from %v. Response: %v. Error: %v", partPath, source, response, err)
 		} else {
@@ -229,13 +271,13 @@ func verifyPkgPart(primarySigningKey string, userKeysDir string, partPath string
 	if err := verifySignatureWithAnyKey(primarySigningKey, userKeysDir, hasher, signatures); err == nil {
 		// verified
 		return nil
-	} else {
-		switch err.(type) {
-		case VerificationError:
-			return VerificationError{fmt.Sprintf("Failed to verify part: %v", partPath)}
-		default:
-			return err
-		}
+	}
+
+	switch err.(type) {
+	case VerificationError:
+		return VerificationError{fmt.Sprintf("Failed to verify part: %v", partPath)}
+	default:
+		return err
 	}
 }
 
@@ -258,7 +300,7 @@ func verifySignatureWithAnyKey(primarySigningKey string, userKeysDir string, has
 	return VerificationError{}
 }
 
-func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, parts horizonpkg.DockerImageParts, destinationDir string, primarySigningKey string, userKeysDir string) ([]string, error) {
+func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, authCreds map[string]map[string]string, parts horizonpkg.DockerImageParts, destinationDir string, primarySigningKey string, userKeysDir string) ([]string, error) {
 	fetchErrs := newFetchErrRecorder()
 	var fetched []string
 
@@ -300,7 +342,7 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 			glog.V(5).Infof("Dispatched goroutine to download (%v) to path: %v (part: %v)", name, partPath, part)
 
 			glog.V(2).Infof("Fetching %v", part.ID)
-			addResult(name, fetchPkgPart(httpClientFactory(nil), partPath, part.Bytes, part.Sources), "")
+			addResult(name, fetchPkgPart(httpClientFactory(nil), authCreds, partPath, part.Bytes, part.Sources), "")
 
 			// TODO: support retries here
 			if len(fetchErrs.Errors) == 0 {
@@ -323,7 +365,7 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 // PkgFetch fetches a pkg metadata file from the given URL and then verifies
 // the content of the pkg.
 //     pkgURL is the URL of the pkg file containing the image content
-func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgURL url.URL, pkgURLSignature string, destinationDir string, primarySigningKey string, userKeysDir string) ([]string, error) {
+func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgURL url.URL, pkgURLSignature string, destinationDir string, primarySigningKey string, userKeysDir string, authCreds map[string]map[string]string) ([]string, error) {
 	mkdirs := func(pp string) error {
 		if err := os.MkdirAll(pp, 0700); err != nil {
 			return err
@@ -342,7 +384,7 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 		return nil, err
 	}
 
-	pkg, err := fetchPkgMeta(client, primarySigningKey, userKeysDir, pkgURL.String(), pkgURLSignature, destinationDir)
+	pkg, err := fetchPkgMeta(client, authCreds, primarySigningKey, userKeysDir, pkgURL.String(), pkgURLSignature, destinationDir)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +400,7 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 	}
 
 	var fetched []string
-	fetched, err = fetchAndVerify(httpClientFactory, pkg.Parts, pkgDestinationDir, primarySigningKey, userKeysDir)
+	fetched, err = fetchAndVerify(httpClientFactory, authCreds, pkg.Parts, pkgDestinationDir, primarySigningKey, userKeysDir)
 	if err != nil {
 		return nil, err
 	}
