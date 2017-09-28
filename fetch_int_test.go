@@ -102,6 +102,8 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 	keysDir, err := filepath.Abs(path.Join(testMaterialDirName, "keys"))
 	assert.Nil(suite, err)
 
+	emptyAuth := make(map[string]map[string]string, 0)
+
 	suite.Run("Confirm testMaterialDir is available and pkg metadata is readable", func(t *testing.T) {
 		assert.EqualValues(t, pkgID, pkg.ID)
 	})
@@ -123,7 +125,7 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 		assert.Nil(t, err)
 		assert.NotNil(t, *ur)
 
-		_, err = PkgFetch(fakeHTTPClientFactory, *ur, "", destinationDir, "", keysDir)
+		_, err = PkgFetch(fakeHTTPClientFactory, *ur, "", destinationDir, "", keysDir, emptyAuth)
 		assert.NotNil(t, err)
 	})
 
@@ -141,7 +143,7 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 		sigBytes, err := ioutil.ReadAll(resp.Body)
 		assert.Nil(t, err)
 
-		pkgs, err := PkgFetch(fakeHTTPClientFactory, *ur, string(sigBytes), destinationDir, "", keysDir)
+		pkgs, err := PkgFetch(fakeHTTPClientFactory, *ur, string(sigBytes), destinationDir, "", keysDir, emptyAuth)
 		assert.Nil(t, err)
 
 		assert.EqualValues(t, 2, len(pkgs))

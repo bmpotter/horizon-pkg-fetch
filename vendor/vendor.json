@@ -243,10 +243,10 @@
 			"revisionTime": "2017-09-27T10:37:29Z"
 		},
 		{
-			"checksumSHA1": "bXZXrAOgQoL1upfF3zpRkoRUm+Y=",
+			"checksumSHA1": "h1pDYMahN29gEwScgfC/1crSQUA=",
 			"path": "github.com/open-horizon/anax/policy",
-			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
-			"revisionTime": "2017-09-27T10:37:29Z"
+			"revision": "2f19090d13ffa0c0bbb4cec1cfd0cc6255297872",
+			"revisionTime": "2017-09-28T15:18:02Z"
 		},
 		{
 			"checksumSHA1": "6Ejtwv2PlXR8sT203iR38S7Y5qQ=",
