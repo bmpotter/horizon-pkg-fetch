@@ -119,18 +119,29 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 	})
 
 	suite.Run("PkgFetch pkg signature verification argument", func(t *testing.T) {
-		url, err := url.Parse(fmt.Sprintf("%s/%s.json", server.URL, pkgID))
+		ur, err := url.Parse(fmt.Sprintf("%s/%s.json", server.URL, pkgID))
 		assert.Nil(t, err)
+		assert.NotNil(t, *ur)
 
-		_, err = PkgFetch(fakeHTTPClientFactory, url, false, destinationDir, keysDir)
+		_, err = PkgFetch(fakeHTTPClientFactory, *ur, "", destinationDir, keysDir)
 		assert.NotNil(t, err)
 	})
 
 	suite.Run("PkgFetch fetches served Pkg files and content, verifies them", func(t *testing.T) {
-		url, err := url.Parse(fmt.Sprintf("%s/%s.json", server.URL, pkgID))
+		ur, err := url.Parse(fmt.Sprintf("%s/%s.json", server.URL, pkgID))
+		assert.Nil(t, err)
+		assert.NotNil(t, *ur)
+
+		resp, err := http.Get(fmt.Sprintf("%s/%s.json.sig", server.URL, pkgID))
+		fmt.Printf("err: %v", err)
+		assert.Nil(t, err)
+		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
+		defer resp.Body.Close()
+
+		sigBytes, err := ioutil.ReadAll(resp.Body)
 		assert.Nil(t, err)
 
-		pkgs, err := PkgFetch(fakeHTTPClientFactory, url, true, destinationDir, keysDir)
+		pkgs, err := PkgFetch(fakeHTTPClientFactory, *ur, string(sigBytes), destinationDir, keysDir)
 		assert.Nil(t, err)
 
 		assert.EqualValues(t, 2, len(pkgs))
