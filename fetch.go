@@ -20,7 +20,7 @@ import (
 )
 
 // side effect: stores the pkgMeta file in destinationDir
-func fetchPkgMeta(client *http.Client, userKeysDir string, pkgURL string, pkgURLSignature string, destinationDir string) (*horizonpkg.Pkg, error) {
+func fetchPkgMeta(client *http.Client, primarySigningKey string, userKeysDir string, pkgURL string, pkgURLSignature string, destinationDir string) (*horizonpkg.Pkg, error) {
 	writeFile := func(destinationDir string, fileName string, content []byte) (string, error) {
 		destFilePath := path.Join(destinationDir, fileName)
 		// this'll overwrite
@@ -50,7 +50,7 @@ func fetchPkgMeta(client *http.Client, userKeysDir string, pkgURL string, pkgURL
 		return nil, fmt.Errorf("Unable to copy Pkg content into hash function. Error: %v", err)
 	}
 
-	if err := verifySignatureWithAnyKey(userKeysDir, hasher, []string{pkgURLSignature}); err != nil {
+	if err := verifySignatureWithAnyKey(primarySigningKey, userKeysDir, hasher, []string{pkgURLSignature}); err != nil {
 		switch err.(type) {
 		case VerificationError:
 			return nil, VerificationError{fmt.Sprintf("Pkg signature not verified. Error: %v", err)}
@@ -198,7 +198,7 @@ func fetchPkgPart(client *http.Client, partPath string, expectedBytes int64, sou
 }
 
 // all provided signatures must match keys in userKeysDir
-func verifyPkgPart(userKeysDir string, partPath string, partHash string, signatures []string) error {
+func verifyPkgPart(primarySigningKey string, userKeysDir string, partPath string, partHash string, signatures []string) error {
 
 	glog.V(5).Infof("Verifying pkg part %v with userKeysDir %v and signatures %v", partPath, userKeysDir, signatures)
 
@@ -226,7 +226,7 @@ func verifyPkgPart(userKeysDir string, partPath string, partHash string, signatu
 		return fmt.Errorf("Mismatch between expected hash, %v and actual hash, %v for %v", partHash, actualHash, partPath)
 	}
 
-	if err := verifySignatureWithAnyKey(userKeysDir, hasher, signatures); err == nil {
+	if err := verifySignatureWithAnyKey(primarySigningKey, userKeysDir, hasher, signatures); err == nil {
 		// verified
 		return nil
 	} else {
@@ -239,13 +239,13 @@ func verifyPkgPart(userKeysDir string, partPath string, partHash string, signatu
 	}
 }
 
-func verifySignatureWithAnyKey(userKeysDir string, hasher hash.Hash, signatures []string) error {
+func verifySignatureWithAnyKey(primarySigningKey string, userKeysDir string, hasher hash.Hash, signatures []string) error {
 
 	// this is computationally expensive
 	for _, sig := range signatures {
 		// TODO: refactor this code, extract verification into rsapss-tool; for efficiency, perhaps we should give keys IDs and include those in the pkg signature
 		glog.V(7).Infof("Verifying with sig: %v, userKeysDir: %v", sig, userKeysDir)
-		verified, err := policy.VerifyWorkload("", sig, hasher, userKeysDir)
+		verified, err := policy.VerifyWorkload(primarySigningKey, sig, hasher, userKeysDir)
 		if err != nil {
 			return err
 		}
@@ -258,7 +258,7 @@ func verifySignatureWithAnyKey(userKeysDir string, hasher hash.Hash, signatures 
 	return VerificationError{}
 }
 
-func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, parts horizonpkg.DockerImageParts, destinationDir string, userKeysDir string) ([]string, error) {
+func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, parts horizonpkg.DockerImageParts, destinationDir string, primarySigningKey string, userKeysDir string) ([]string, error) {
 	fetchErrs := newFetchErrRecorder()
 	var fetched []string
 
@@ -305,7 +305,7 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 			// TODO: support retries here
 			if len(fetchErrs.Errors) == 0 {
 				glog.V(2).Infof("Verifying %v", part)
-				addResult(name, verifyPkgPart(userKeysDir, partPath, part.Sha256sum, part.Signatures), partPath)
+				addResult(name, verifyPkgPart(primarySigningKey, userKeysDir, partPath, part.Sha256sum, part.Signatures), partPath)
 			}
 
 		}(name, part)
@@ -323,7 +323,7 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 // PkgFetch fetches a pkg metadata file from the given URL and then verifies
 // the content of the pkg.
 //     pkgURL is the URL of the pkg file containing the image content
-func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgURL url.URL, pkgURLSignature string, destinationDir string, userKeysDir string) ([]string, error) {
+func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgURL url.URL, pkgURLSignature string, destinationDir string, primarySigningKey string, userKeysDir string) ([]string, error) {
 	mkdirs := func(pp string) error {
 		if err := os.MkdirAll(pp, 0700); err != nil {
 			return err
@@ -342,7 +342,7 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 		return nil, err
 	}
 
-	pkg, err := fetchPkgMeta(client, userKeysDir, pkgURL.String(), pkgURLSignature, destinationDir)
+	pkg, err := fetchPkgMeta(client, primarySigningKey, userKeysDir, pkgURL.String(), pkgURLSignature, destinationDir)
 	if err != nil {
 		return nil, err
 	}
@@ -358,7 +358,7 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 	}
 
 	var fetched []string
-	fetched, err = fetchAndVerify(httpClientFactory, pkg.Parts, pkgDestinationDir, userKeysDir)
+	fetched, err = fetchAndVerify(httpClientFactory, pkg.Parts, pkgDestinationDir, primarySigningKey, userKeysDir)
 	if err != nil {
 		return nil, err
 	}
