@@ -28,7 +28,8 @@ func authenticatedRequest(url string, authCreds map[string]map[string]string) (*
 
 	// matching them (for now) amounts to first prefix match wins
 	for k, v := range authCreds {
-		if strings.HasSuffix(url, k) {
+		if strings.HasPrefix(url, k) {
+
 			var username string
 			if val, ok := v["username"]; ok {
 				username = val
