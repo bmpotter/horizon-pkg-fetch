@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -41,7 +42,10 @@ func setup(t *testing.T, tmpDir string, serverURL string) *horizonpkg.Pkg {
 
 	// modify pkg so the paths match our server's domain and port
 	for id, _ := range pkg.Parts {
-		pkg.Parts[id].Sources[0] = horizonpkg.PartSource{fmt.Sprintf("%s/%s/%s.tgz", serverURL, pkg.ID, id)}
+		// only modify those with scheme and domain, ignore the absolute path source URLs
+		if strings.HasPrefix(pkg.Parts[id].Sources[0].URL, "http") {
+			pkg.Parts[id].Sources[0] = horizonpkg.PartSource{fmt.Sprintf("%s/%s/%s.tgz", serverURL, pkg.ID, id)}
+		}
 	}
 
 	bytes, err := json.Marshal(pkg)
@@ -135,7 +139,6 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 		assert.NotNil(t, *ur)
 
 		resp, err := http.Get(fmt.Sprintf("%s/%s.json.sig", server.URL, pkgID))
-		fmt.Printf("err: %v", err)
 		assert.Nil(t, err)
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 		defer resp.Body.Close()

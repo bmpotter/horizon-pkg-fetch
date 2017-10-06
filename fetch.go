@@ -152,7 +152,7 @@ func newFetchErrRecorder() fetchErrRecorder {
 	}
 }
 
-func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, partPath string, expectedBytes int64, sources []horizonpkg.PartSource) error {
+func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, pkgURLBase string, partPath string, expectedBytes int64, sources []horizonpkg.PartSource) error {
 	tryOpen := func(path string) (*os.File, error) {
 		return os.OpenFile(partPath, os.O_RDWR|os.O_CREATE, 0600)
 	}
@@ -201,14 +201,23 @@ func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, p
 
 	// we are clean, try download
 	for _, source := range sources {
-		req, err := authenticatedRequest(source.URL, authCreds)
+		var url string
+		if strings.HasPrefix(source.URL, "/") {
+			// it's an absolute path but we need to prepend the Pkg's domain, it's assumed by convention
+			url = fmt.Sprintf("%s%s", pkgURLBase, source.URL)
+			glog.V(4).Infof("Part has absolute URL path but assumes domain by convention. Composed full URL %v using domain from Pkg URL", url)
+		} else {
+			url = source.URL
+		}
+
+		req, err := authenticatedRequest(url, authCreds)
 		if err != nil {
 			return err
 		}
 
 		// fetch, hydrate
 		response, err := client.Do(req)
-		if err != nil || response.StatusCode != 200 {
+		if err != nil || response.StatusCode != http.StatusOK {
 			glog.Errorf("Failed to download part %v from %v. Response: %v. Error: %v", partPath, source, response, err)
 		} else {
 			defer response.Body.Close()
@@ -301,7 +310,7 @@ func verifySignatureWithAnyKey(primarySigningKey string, userKeysDir string, has
 	return VerificationError{}
 }
 
-func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, authCreds map[string]map[string]string, parts horizonpkg.DockerImageParts, destinationDir string, primarySigningKey string, userKeysDir string) ([]string, error) {
+func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, authCreds map[string]map[string]string, pkgURLBase string, parts horizonpkg.DockerImageParts, destinationDir string, primarySigningKey string, userKeysDir string) ([]string, error) {
 	fetchErrs := newFetchErrRecorder()
 	var fetched []string
 
@@ -343,7 +352,7 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 			glog.V(5).Infof("Dispatched goroutine to download (%v) to path: %v (part: %v)", name, partPath, part)
 
 			glog.V(2).Infof("Fetching %v", part.ID)
-			addResult(name, fetchPkgPart(httpClientFactory(nil), authCreds, partPath, part.Bytes, part.Sources), "")
+			addResult(name, fetchPkgPart(httpClientFactory(nil), authCreds, pkgURLBase, partPath, part.Bytes, part.Sources), "")
 
 			// TODO: support retries here
 			if len(fetchErrs.Errors) == 0 {
@@ -400,8 +409,10 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 		return nil, err
 	}
 
+	pkgURLBase := fmt.Sprintf("%s://%s", pkgURL.Scheme, pkgURL.Host)
+
 	var fetched []string
-	fetched, err = fetchAndVerify(httpClientFactory, authCreds, pkg.Parts, pkgDestinationDir, primarySigningKey, userKeysDir)
+	fetched, err = fetchAndVerify(httpClientFactory, authCreds, pkgURLBase, pkg.Parts, pkgDestinationDir, primarySigningKey, userKeysDir)
 	if err != nil {
 		return nil, err
 	}
