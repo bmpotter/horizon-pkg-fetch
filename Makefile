@@ -92,7 +92,8 @@ test: deps
 test-integration: deps
 	@echo "Executing integration tests"
 	-cd $(PKGPATH) && \
-    GOPATH=$(TMPGOPATH) go test -cover -tags=integration $(PKGS)
+    GOPATH=$(TMPGOPATH) go test -cover -tags=integration $(PKGS); \
+    GOPATH=$(TMPGOPATH) go test -cover -tags=ci $(PKGS)
 
 check: lint test test-integration
 

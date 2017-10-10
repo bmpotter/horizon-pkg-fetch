@@ -351,8 +351,15 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 
 			glog.V(5).Infof("Dispatched goroutine to download (%v) to path: %v (part: %v)", name, partPath, part)
 
+			var timeoutS uint
+			if part.Bytes <= 1024*1024 {
+				timeoutS = uint(120)
+			} else {
+				timeoutS = uint((part.Bytes * 8) / 1024 / 100)
+			}
+
 			glog.V(2).Infof("Fetching %v", part.ID)
-			addResult(name, fetchPkgPart(httpClientFactory(nil), authCreds, pkgURLBase, partPath, part.Bytes, part.Sources), "")
+			addResult(name, fetchPkgPart(httpClientFactory(&timeoutS), authCreds, pkgURLBase, partPath, part.Bytes, part.Sources), "")
 
 			// TODO: support retries here
 			if len(fetchErrs.Errors) == 0 {

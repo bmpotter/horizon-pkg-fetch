@@ -83,6 +83,8 @@ func fakeHTTPClientFactory(timeoutS *uint) *http.Client {
 	if timeoutS == nil {
 		t := uint(10)
 		timeout = &t
+	} else {
+		timeout = timeoutS
 	}
 
 	return &http.Client{
@@ -93,7 +95,7 @@ func fakeHTTPClientFactory(timeoutS *uint) *http.Client {
 func Test_PkgFetch_Suite(suite *testing.T) {
 	tmpDir, err := ioutil.TempDir("", "fetch-test-int-")
 	assert.Nil(suite, err)
-	//defer os.RemoveAll(tmpDir)
+	defer os.RemoveAll(tmpDir)
 
 	// serve out of tmpDir, setup will change content of the Pkg to match the ad-hoc server set up here
 	server := httptest.NewServer(http.FileServer(http.Dir(fmt.Sprintf("%v/srv", tmpDir))))
@@ -132,7 +134,6 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 		_, err = PkgFetch(fakeHTTPClientFactory, *ur, "", destinationDir, "", keysDir, emptyAuth)
 		assert.NotNil(t, err)
 	})
-
 	suite.Run("PkgFetch fetches served Pkg files and content, verifies them", func(t *testing.T) {
 		ur, err := url.Parse(fmt.Sprintf("%s/%s.json", server.URL, pkgID))
 		assert.Nil(t, err)
