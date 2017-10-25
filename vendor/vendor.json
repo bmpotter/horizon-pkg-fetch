@@ -225,6 +225,18 @@
 			"revisionTime": "2016-01-25T20:49:56Z"
 		},
 		{
+			"checksumSHA1": "g/V4qrXjUGG9B+e3hB+4NAYJ5Gs=",
+			"path": "github.com/gorilla/context",
+			"revision": "08b5f424b9271eedf6f9f0ce86cb9396ed337a42",
+			"revisionTime": "2016-08-17T18:46:32Z"
+		},
+		{
+			"checksumSHA1": "06I0wBTXKCu2Br46zNqsv+LXRgY=",
+			"path": "github.com/gorilla/mux",
+			"revision": "7625a85c14e615274a4ee4bc8654f72310a563e4",
+			"revisionTime": "2017-10-20T03:47:00Z"
+		},
+		{
 			"checksumSHA1": "G/U0FXCu6ajOEK/gQS19ohsZ10k=",
 			"path": "github.com/open-horizon/anax/cutil",
 			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
