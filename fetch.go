@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/golang/glog"
 	"github.com/open-horizon/anax/policy"
+	"github.com/open-horizon/horizon-pkg-fetch/fetcherrors"
 	"github.com/open-horizon/horizon-pkg-fetch/horizonpkg"
 	"hash"
 	"io"
@@ -20,15 +21,15 @@ import (
 	"sync"
 )
 
-func authenticatedRequest(url string, authCreds map[string]map[string]string) (*http.Request, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+func authenticatedRequest(pURL string, authCreds map[string]map[string]string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodGet, pURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	// matching them (for now) amounts to first prefix match wins
 	for k, v := range authCreds {
-		if strings.HasPrefix(url, k) {
+		if strings.HasPrefix(pURL, k) {
 
 			var username string
 			if val, ok := v["username"]; ok {
@@ -41,7 +42,7 @@ func authenticatedRequest(url string, authCreds map[string]map[string]string) (*
 			}
 
 			if username != "" && password != "" {
-				glog.V(3).Infof("Using username %v in HTTPS Basic auth header to %v", username, url)
+				glog.V(3).Infof("Using username %v in HTTPS Basic auth header to %v", username, pURL)
 				req.SetBasicAuth(username, password)
 				break
 			}
@@ -57,7 +58,7 @@ func fetchPkgMeta(client *http.Client, authCreds map[string]map[string]string, p
 		destFilePath := path.Join(destinationDir, fileName)
 		// this'll overwrite
 		if err := ioutil.WriteFile(destFilePath, content, 0600); err != nil {
-			return "", err
+			return "", fetcherrors.PkgMetaError{fmt.Sprintf("Failed to write file %v", destFilePath), err}
 		}
 
 		return destFilePath, nil
@@ -77,7 +78,7 @@ func fetchPkgMeta(client *http.Client, authCreds map[string]map[string]string, p
 	}
 
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Unexpected status code in response to Horizon Pkg fetch: %v", response.StatusCode)
+		return nil, fetcherrors.PkgMetaError{fmt.Sprintf("Unexpected status code in response to Horizon Pkg fetch: %v", response.StatusCode), fmt.Errorf("Failed to fetch Pkg meta from %v", pkgURL)}
 	}
 	defer response.Body.Close()
 	rawBody, err := ioutil.ReadAll(response.Body)
@@ -88,12 +89,8 @@ func fetchPkgMeta(client *http.Client, authCreds map[string]map[string]string, p
 	}
 
 	if err := verifySignatureWithAnyKey(primarySigningKey, userKeysDir, hasher, []string{pkgURLSignature}); err != nil {
-		switch err.(type) {
-		case VerificationError:
-			return nil, VerificationError{fmt.Sprintf("Pkg signature not verified. Error: %v", err)}
-		default:
-			return nil, err
-		}
+
+		return nil, fetcherrors.PkgMetaError{fmt.Sprintf("Pkg metadata failed cryptographic verification: %v", err), fmt.Errorf("Failure processing Pkg meta: %v and signature: %v", pkgURL, pkgURLSignature)}
 	}
 
 	var pkg horizonpkg.Pkg
@@ -152,6 +149,11 @@ func newFetchErrRecorder() fetchErrRecorder {
 	}
 }
 
+type partFetchFailure struct {
+	HTTPStatusCode int
+	PartURL        string
+}
+
 func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, pkgURLBase string, partPath string, expectedBytes int64, sources []horizonpkg.PartSource) error {
 	tryOpen := func(path string) (*os.File, error) {
 		return os.OpenFile(partPath, os.O_RDWR|os.O_CREATE, 0600)
@@ -199,18 +201,22 @@ func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, p
 		}
 	}
 
+	var fetchFailure *partFetchFailure
+
 	// we are clean, try download
 	for _, source := range sources {
-		var url string
+		var pURL string
 		if strings.HasPrefix(source.URL, "/") {
 			// it's an absolute path but we need to prepend the Pkg's domain, it's assumed by convention
-			url = fmt.Sprintf("%s%s", pkgURLBase, source.URL)
-			glog.V(4).Infof("Part has absolute URL path but assumes domain by convention. Composed full URL %v using domain from Pkg URL", url)
+			pURL = fmt.Sprintf("%s%s", pkgURLBase, source.URL)
+			glog.V(3).Infof("Part has absolute URL path but assumes domain by convention. Composed full URL %v using domain from Pkg URL", pURL)
 		} else {
-			url = source.URL
+			pURL = source.URL
 		}
 
-		req, err := authenticatedRequest(url, authCreds)
+		fetchFailure = nil
+
+		req, err := authenticatedRequest(pURL, authCreds)
 		if err != nil {
 			return err
 		}
@@ -218,7 +224,8 @@ func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, p
 		// fetch, hydrate
 		response, err := client.Do(req)
 		if err != nil || response.StatusCode != http.StatusOK {
-			glog.Errorf("Failed to download part %v from %v. Response: %v. Error: %v", partPath, source, response, err)
+			glog.Errorf("Failed to download part %v from %v (using url %v). Response: %v. Error: %v", partPath, source, pURL, response, err)
+			fetchFailure = &partFetchFailure{response.StatusCode, pURL}
 		} else {
 			defer response.Body.Close()
 			bytes, err := io.Copy(partFile, response.Body)
@@ -227,10 +234,10 @@ func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, p
 			}
 
 			if bytes != expectedBytes {
-				glog.Errorf("Error in download and copy of part %v from %v", partPath, source)
+				glog.Errorf("Error in download and copy of part %v from %v (using url %v)", partPath, source, pURL)
 
 				// ignore error, give it another shot
-				tryRemove(partFile, fmt.Sprintf("Error in download and copy of part %v from %v", partPath, source))
+				tryRemove(partFile, fmt.Sprintf("Error in download and copy of part %v from %v (using url %v)", partPath, source, pURL))
 
 				partFile, openErr = tryOpen(partPath)
 				if openErr != nil {
@@ -245,8 +252,19 @@ func fetchPkgPart(client *http.Client, authCreds map[string]map[string]string, p
 		}
 	}
 
+	internalError := fmt.Errorf("Part could not be fetched: %v from any of its sources: %v", partPath, sources)
+
+	// if this isn't nil, we failed on at least the most recent source and report it
+	if fetchFailure != nil {
+		if fetchFailure.HTTPStatusCode == 401 || fetchFailure.HTTPStatusCode == 403 {
+			return fetcherrors.PkgSourceFetchAuthError{fmt.Sprintf("Authentication or Authorization error attempting to fetch part from URL: %v. HTTP Status code: %v", fetchFailure.PartURL, fetchFailure.HTTPStatusCode), internalError}
+		}
+
+		return fetcherrors.PkgSourceFetchError{fmt.Sprintf("Error when fetching part from URL: %v. HTTP Status code: %v", fetchFailure.PartURL, fetchFailure.HTTPStatusCode), internalError}
+	}
+
 	// try fetching a part from each source, if all fail exit with error
-	return fmt.Errorf("Failed to complete download of %v", partPath)
+	return fetcherrors.PkgSourceFetchError{fmt.Sprintf("Failed to complete fetch."), internalError}
 }
 
 // all provided signatures must match keys in userKeysDir
@@ -275,7 +293,7 @@ func verifyPkgPart(primarySigningKey string, userKeysDir string, partPath string
 		if err != nil {
 			glog.Errorf("Failed to remove part %v after failed hash check. Error: %v", partPath, err)
 		}
-		return fmt.Errorf("Mismatch between expected hash, %v and actual hash, %v for %v", partHash, actualHash, partPath)
+		return fetcherrors.PkgSignatureVerificationError{fmt.Sprintf("Mismatch between expected hash, %v and actual hash.", partHash, actualHash), fmt.Errorf("Part failed verification: %v", partPath)}
 	}
 
 	if err := verifySignatureWithAnyKey(primarySigningKey, userKeysDir, hasher, signatures); err == nil {
@@ -283,12 +301,7 @@ func verifyPkgPart(primarySigningKey string, userKeysDir string, partPath string
 		return nil
 	}
 
-	switch err.(type) {
-	case VerificationError:
-		return VerificationError{fmt.Sprintf("Failed to verify part: %v", partPath)}
-	default:
-		return err
-	}
+	return fetcherrors.PkgSignatureVerificationError{fmt.Sprintf("Part failed cryptographic verification: %v", err), fmt.Errorf("Part failed verification: %v", partPath)}
 }
 
 func verifySignatureWithAnyKey(primarySigningKey string, userKeysDir string, hasher hash.Hash, signatures []string) error {
@@ -398,7 +411,7 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 
 	// make pkg subdirectory in destination directory
 	if err := mkdirs(destinationDir); err != nil {
-		return nil, err
+		return nil, fetcherrors.PkgSourceError{"Failed creating Pkg destination dirs on host", err}
 	}
 
 	pkg, err := fetchPkgMeta(client, authCreds, primarySigningKey, userKeysDir, pkgURL.String(), pkgURLSignature, destinationDir)
@@ -408,15 +421,18 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 
 	// we do this separately so we have a greater chance of the async fetches succeeding before we start them all
 	if err := precheckPkgParts(pkg); err != nil {
-		return nil, err
+		return nil, fetcherrors.PkgPrecheckError{"Failed to validate Pkg information before fetching", err}
 	}
 
 	pkgDestinationDir := path.Join(destinationDir, pkg.ID)
 	if err := mkdirs(pkgDestinationDir); err != nil {
-		return nil, err
+		return nil, fetcherrors.PkgSourceError{"Failed creating Pkg destination dirs on host", err}
 	}
 
-	pkgURLBase := fmt.Sprintf("%s://%s", pkgURL.Scheme, pkgURL.Host)
+	pkgURLParts := strings.Split(pkgURL.String(), "/")
+	pkgURLBase := strings.Join(pkgURLParts[0:len(pkgURLParts)-1], "/")
+
+	glog.V(4).Infof("Extracted pkgURLBase %v from pkgURL %v", pkgURLBase, pkgURL.String())
 
 	var fetched []string
 	fetched, err = fetchAndVerify(httpClientFactory, authCreds, pkgURLBase, pkg.Parts, pkgDestinationDir, primarySigningKey, userKeysDir)
