@@ -237,34 +237,16 @@
 			"revisionTime": "2017-10-20T03:47:00Z"
 		},
 		{
-			"checksumSHA1": "G/U0FXCu6ajOEK/gQS19ohsZ10k=",
-			"path": "github.com/open-horizon/anax/cutil",
-			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
-			"revisionTime": "2017-09-27T10:37:29Z"
-		},
-		{
-			"checksumSHA1": "+D2aqX3XiZKsD/IJjdQKOZ2O00k=",
-			"path": "github.com/open-horizon/anax/events",
-			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
-			"revisionTime": "2017-09-27T10:37:29Z"
-		},
-		{
-			"checksumSHA1": "krk+CIYFXz6T2sahdL1atNz6XRA=",
-			"path": "github.com/open-horizon/anax/persistence",
-			"revision": "75115b57719ca715e534c853f05873d6e9226aa6",
-			"revisionTime": "2017-09-27T10:37:29Z"
-		},
-		{
-			"checksumSHA1": "h1pDYMahN29gEwScgfC/1crSQUA=",
-			"path": "github.com/open-horizon/anax/policy",
-			"revision": "2f19090d13ffa0c0bbb4cec1cfd0cc6255297872",
-			"revisionTime": "2017-09-28T15:18:02Z"
-		},
-		{
 			"checksumSHA1": "6Ejtwv2PlXR8sT203iR38S7Y5qQ=",
 			"path": "github.com/open-horizon/rsapss-tool/sign",
-			"revision": "1912a61885dc3627876796d064997853fa9b189f",
-			"revisionTime": "2017-09-25T16:29:00Z"
+			"revision": "d48d3dbcb9ddb13d4e241041965d94b35ee16628",
+			"revisionTime": "2017-11-08T18:52:45Z"
+		},
+		{
+			"checksumSHA1": "VUNbvSnk5sCRMPopbBqaKYM3ZUc=",
+			"path": "github.com/open-horizon/rsapss-tool/verify",
+			"revision": "d48d3dbcb9ddb13d4e241041965d94b35ee16628",
+			"revisionTime": "2017-11-08T18:52:45Z"
 		},
 		{
 			"checksumSHA1": "OFNit1Qx2DdWhotfREKodDNUwCM=",
