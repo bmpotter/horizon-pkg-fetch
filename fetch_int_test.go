@@ -160,15 +160,10 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 
 		assert.EqualValues(t, 2, len(pkgs))
 
-		// get whatever comes up first
-		var id string
-		for id, _ = range pkg.Parts {
-			break
-		}
+		abspath, exists := pkgs["alpine:3.5"]
+		assert.True(t, exists)
+		assert.True(t, strings.HasSuffix(abspath, "29ef6969f5cc871153e6a00ec197bb071ce8ceae/ab42a0b95e1f1b6addd36256482a9dd034565a962ac792f89d6bd99694d34d92"))
 
-		abs, err := filepath.Abs(path.Join(destinationDir, pkg.ID, id))
-		assert.Nil(t, err)
-		assert.Contains(t, pkgs, abs)
 	})
 
 	// TODO: expand these cases, test the edges
