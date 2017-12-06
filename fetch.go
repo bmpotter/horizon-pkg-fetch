@@ -103,17 +103,20 @@ func fetchPkgMeta(client *http.Client, authCreds map[string]map[string]string, k
 	return &pkg, nil
 }
 
-func precheckPkgParts(pkg *horizonpkg.Pkg) error {
+func precheckPkgParts(pkg *horizonpkg.Pkg) (map[string]horizonpkg.DockerImagePart, error) {
+	partsMap := make(map[string]horizonpkg.DockerImagePart, 0)
+
 	for _, part := range pkg.Parts {
 		repoTag, exists := pkg.Meta.Provides.Images[part.ID]
 		if !exists {
-			return fmt.Errorf("Error in pkg file: Meta.Provides is expected to contain metadata about each part and it is missing info about part %v", part)
+			return partsMap, fmt.Errorf("Error in pkg file: Meta.Provides is expected to contain metadata about each part and it is missing info about part %v", part)
 		}
-		glog.V(2).Infof("Precheck of container %v (Pkg part id: %v) passed, will fetch it", repoTag, part.ID)
 
+		glog.V(2).Infof("Precheck of container %v (Pkg part id: %v) passed, will fetch it", repoTag, part.ID)
+		partsMap[repoTag] = part
 	}
 
-	return nil
+	return partsMap, nil
 }
 
 // VerificationError extends error, indicating a problem verifying a Pkg part
@@ -309,21 +312,22 @@ func verifySignatureWithAnyKey(keyFiles []string, data []byte, signatures []stri
 		// TODO: refactor this code, extract verification into rsapss-tool; for efficiency, perhaps we should give keys IDs and include those in the pkg signature
 		glog.V(7).Infof("Verifying with sig: %v, key files: %v", sig, keyFiles)
 
-		if verified, _, failed_map := verify.InputVerifiedByAnyKey(keyFiles, sig, data); !verified {
-			return fmt.Errorf("Error verifying signature: %v for data: %v, Error: %v", sig, string(data), failed_map)
-		} else {
-			return nil
+		if verified, _, failedMap := verify.InputVerifiedByAnyKey(keyFiles, sig, data); !verified {
+			return fmt.Errorf("Error verifying signature: %v for data: %v, Error: %v", sig, string(data), failedMap)
 		}
+
+		return nil
 	}
 
 	return VerificationError{}
 }
 
-func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, authCreds map[string]map[string]string, pkgURLBase string, parts horizonpkg.DockerImageParts, destinationDir string, keyFiles []string) ([]string, error) {
+func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, authCreds map[string]map[string]string, pkgURLBase string, partsMap map[string]horizonpkg.DockerImagePart, destinationDir string, keyFiles []string) (map[string]string, error) {
 	fetchErrs := newFetchErrRecorder()
-	var fetched []string
+	// a mapping of docker image repotag to abs path
+	fetched := make(map[string]string, 0)
 
-	addResult := func(id string, err error, partPath string) {
+	addResult := func(id string, repotag string, err error, partPath string) {
 		fetchErrs.WriteLock.Lock()
 		defer fetchErrs.WriteLock.Unlock()
 
@@ -340,25 +344,24 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 			if err != nil {
 				fetchErrs.Errors[id] = err
 			} else {
-				fetched = append(fetched, abs)
+				fetched[repotag] = abs
 			}
 		}
 	}
 
 	var group sync.WaitGroup
 
-	for name, part := range parts {
-
+	for repotag, part := range partsMap {
 		group.Add(1)
 
 		// wrap up the functionality per part; (note that we avoid problematic closed-over iteration vars in the go routine)
-		go func(name string, part horizonpkg.DockerImagePart) {
+		go func(repotag string, part horizonpkg.DockerImagePart) {
 			defer group.Done()
 
 			// we don't care about file extensions if they're not in the ID
-			partPath := path.Join(destinationDir, name)
+			partPath := path.Join(destinationDir, part.ID)
 
-			glog.V(5).Infof("Dispatched goroutine to download (%v) to path: %v (part: %v)", name, partPath, part)
+			glog.V(5).Infof("Dispatched goroutine to download %v (%v) to path: %v", part.ID, repotag, partPath)
 
 			var timeoutS uint
 			if part.Bytes <= 1024*1024 {
@@ -368,15 +371,15 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 			}
 
 			glog.V(2).Infof("Fetching %v", part.ID)
-			addResult(name, fetchPkgPart(httpClientFactory(&timeoutS), authCreds, pkgURLBase, partPath, part.Bytes, part.Sources), "")
+			addResult(part.ID, repotag, fetchPkgPart(httpClientFactory(&timeoutS), authCreds, pkgURLBase, partPath, part.Bytes, part.Sources), "")
 
 			// TODO: support retries here
 			if len(fetchErrs.Errors) == 0 {
 				glog.V(2).Infof("Verifying %v", part)
-				addResult(name, verifyPkgPart(keyFiles, partPath, part.Sha256sum, part.Signatures), partPath)
+				addResult(part.ID, repotag, verifyPkgPart(keyFiles, partPath, part.Sha256sum, part.Signatures), partPath)
 			}
 
-		}(name, part)
+		}(repotag, part)
 	}
 
 	group.Wait()
@@ -391,7 +394,7 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 // PkgFetch fetches a pkg metadata file from the given URL and then verifies
 // the content of the pkg.
 //     pkgURL is the URL of the pkg file containing the image content
-func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgURL url.URL, pkgURLSignature string, destinationDir string, keyFiles []string, authCreds map[string]map[string]string) ([]string, error) {
+func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgURL url.URL, pkgURLSignature string, destinationDir string, keyFiles []string, authCreds map[string]map[string]string) (map[string]string, error) {
 	mkdirs := func(pp string) error {
 		if err := os.MkdirAll(pp, 0700); err != nil {
 			return err
@@ -416,7 +419,8 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 	}
 
 	// we do this separately so we have a greater chance of the async fetches succeeding before we start them all
-	if err := precheckPkgParts(pkg); err != nil {
+	partsMap, err := precheckPkgParts(pkg)
+	if err != nil {
 		return nil, fetcherrors.PkgPrecheckError{"Failed to validate Pkg information before fetching", err}
 	}
 
@@ -430,8 +434,8 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 
 	glog.V(4).Infof("Extracted pkgURLBase %v from pkgURL %v", pkgURLBase, pkgURL.String())
 
-	var fetched []string
-	fetched, err = fetchAndVerify(httpClientFactory, authCreds, pkgURLBase, pkg.Parts, pkgDestinationDir, keyFiles)
+	var fetched map[string]string
+	fetched, err = fetchAndVerify(httpClientFactory, authCreds, pkgURLBase, partsMap, pkgDestinationDir, keyFiles)
 	if err != nil {
 		return nil, err
 	}

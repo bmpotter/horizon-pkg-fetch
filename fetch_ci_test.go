@@ -70,7 +70,10 @@ func Test_PkgFetch_CI_Suite(suite *testing.T) {
 
 		abs, err := filepath.Abs(path.Join(destinationDir, remotePkg, "a05b7b7bb4d82ae5da5299592df3e89699031a7d5bcc6ba75ce45e28dca1898a"))
 		assert.Nil(t, err)
-		assert.Contains(t, pkgs, abs)
+
+		abspath, exists := pkgs["horizon-test-ci:latest"]
+		assert.True(t, exists)
+		assert.EqualValues(t, abspath, abs)
 	})
 
 	// TODO: expand these cases, test the edges
