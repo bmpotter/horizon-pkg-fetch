@@ -63,7 +63,7 @@ func Test_PkgFetch_CI_Suite(suite *testing.T) {
 		assert.Nil(t, err)
 
 		keyfile := filepath.Join(keysDir, "public.pem")
-		pkgs, err := PkgFetch(fakeHTTPClientFactory, *ur, string(sigBytes), destinationDir, []string{keyfile}, emptyAuth)
+		pkgs, err := PkgFetch(fakeHTTPClientFactory, nil, *ur, string(sigBytes), destinationDir, []string{keyfile}, emptyAuth)
 		assert.Nil(t, err)
 
 		assert.EqualValues(t, 1, len(pkgs))
