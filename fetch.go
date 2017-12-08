@@ -322,12 +322,12 @@ func verifySignatureWithAnyKey(keyFiles []string, data []byte, signatures []stri
 	return VerificationError{}
 }
 
-func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, authCreds map[string]map[string]string, pkgURLBase string, partsMap map[string]horizonpkg.DockerImagePart, destinationDir string, keyFiles []string) (map[string]string, error) {
+func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client, skipPartFetchFn *func(repotag string) (bool, error), authCreds map[string]map[string]string, pkgURLBase string, partsMap map[string]horizonpkg.DockerImagePart, destinationDir string, keyFiles []string) (map[string]string, error) {
 	fetchErrs := newFetchErrRecorder()
 	// a mapping of docker image repotag to abs path
 	fetched := make(map[string]string, 0)
 
-	addResult := func(id string, repotag string, err error, partPath string) {
+	addResult := func(id string, repotag string, err error, partPath *string) {
 		fetchErrs.WriteLock.Lock()
 		defer fetchErrs.WriteLock.Unlock()
 
@@ -336,15 +336,21 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 
 			glog.V(6).Infof("Recording fetch error: %v with key: %v", err, id)
 			fetchErrs.Errors[id] = err
-		} else if partPath != "" {
+		} else if partPath != nil {
 			// success
 
-			var abs string
-			abs, err = filepath.Abs(partPath)
-			if err != nil {
-				fetchErrs.Errors[id] = err
+			if *partPath == "" {
+				// indicates a skipped fetch, a success
+				fetched[repotag] = ""
 			} else {
-				fetched[repotag] = abs
+				// indicates a succesful fetch
+				var abs string
+				abs, err = filepath.Abs(*partPath)
+				if err != nil {
+					fetchErrs.Errors[id] = err
+				} else {
+					fetched[repotag] = abs
+				}
 			}
 		}
 	}
@@ -352,6 +358,19 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 	var group sync.WaitGroup
 
 	for repotag, part := range partsMap {
+		if skipPartFetchFn != nil {
+			skip, err := (*skipPartFetchFn)(repotag)
+			if err != nil {
+				glog.Errorf("Check with provided skip part function failed with error: %v. Proceeding with fetch", err)
+			} else if skip {
+				glog.V(3).Infof("Skipping fetch of %v because provided skip part function reported the part was already available", repotag)
+				// an empty string
+				empty := ""
+				addResult(part.ID, repotag, nil, &empty)
+				continue
+			}
+		}
+
 		group.Add(1)
 
 		// wrap up the functionality per part; (note that we avoid problematic closed-over iteration vars in the go routine)
@@ -371,12 +390,12 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 			}
 
 			glog.V(2).Infof("Fetching %v", part.ID)
-			addResult(part.ID, repotag, fetchPkgPart(httpClientFactory(&timeoutS), authCreds, pkgURLBase, partPath, part.Bytes, part.Sources), "")
+			addResult(part.ID, repotag, fetchPkgPart(httpClientFactory(&timeoutS), authCreds, pkgURLBase, partPath, part.Bytes, part.Sources), nil)
 
 			// TODO: support retries here
 			if len(fetchErrs.Errors) == 0 {
 				glog.V(2).Infof("Verifying %v", part)
-				addResult(part.ID, repotag, verifyPkgPart(keyFiles, partPath, part.Sha256sum, part.Signatures), partPath)
+				addResult(part.ID, repotag, verifyPkgPart(keyFiles, partPath, part.Sha256sum, part.Signatures), &partPath)
 			}
 
 		}(repotag, part)
@@ -394,7 +413,7 @@ func fetchAndVerify(httpClientFactory func(overrideTimeoutS *uint) *http.Client,
 // PkgFetch fetches a pkg metadata file from the given URL and then verifies
 // the content of the pkg.
 //     pkgURL is the URL of the pkg file containing the image content
-func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgURL url.URL, pkgURLSignature string, destinationDir string, keyFiles []string, authCreds map[string]map[string]string) (map[string]string, error) {
+func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, skipPartFetchFn *func(repotag string) (bool, error), pkgURL url.URL, pkgURLSignature string, destinationDir string, keyFiles []string, authCreds map[string]map[string]string) (map[string]string, error) {
 	mkdirs := func(pp string) error {
 		if err := os.MkdirAll(pp, 0700); err != nil {
 			return err
@@ -435,7 +454,7 @@ func PkgFetch(httpClientFactory func(overrideTimeoutS *uint) *http.Client, pkgUR
 	glog.V(4).Infof("Extracted pkgURLBase %v from pkgURL %v", pkgURLBase, pkgURL.String())
 
 	var fetched map[string]string
-	fetched, err = fetchAndVerify(httpClientFactory, authCreds, pkgURLBase, partsMap, pkgDestinationDir, keyFiles)
+	fetched, err = fetchAndVerify(httpClientFactory, skipPartFetchFn, authCreds, pkgURLBase, partsMap, pkgDestinationDir, keyFiles)
 	if err != nil {
 		return nil, err
 	}

@@ -137,7 +137,7 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 		assert.NotNil(t, *ur)
 
 		keyfile := filepath.Join(keysDir, "public.pem")
-		_, err = PkgFetch(fakeHTTPClientFactory, *ur, "", destinationDir, []string{keyfile}, emptyAuth)
+		_, err = PkgFetch(fakeHTTPClientFactory, nil, *ur, "", destinationDir, []string{keyfile}, emptyAuth)
 		assert.NotNil(t, err)
 	})
 
@@ -155,7 +155,7 @@ func Test_PkgFetch_Suite(suite *testing.T) {
 		assert.Nil(t, err)
 
 		keyfile := filepath.Join(keysDir, "public.pem")
-		pkgs, err := PkgFetch(fakeHTTPClientFactory, *ur, string(sigBytes), destinationDir, []string{keyfile}, emptyAuth)
+		pkgs, err := PkgFetch(fakeHTTPClientFactory, nil, *ur, string(sigBytes), destinationDir, []string{keyfile}, emptyAuth)
 		assert.Nil(t, err)
 
 		assert.EqualValues(t, 2, len(pkgs))
